@@ -2,6 +2,8 @@ package net.degoes.zio
 
 import zio._
 
+import scala.annotation.tailrec
+
 object HelloWorld extends App {
   import zio.console._
 
@@ -104,7 +106,7 @@ object AlarmApp extends App {
   lazy val getAlarmDuration: ZIO[Console, IOException, Duration] = {
     def parseDuration(input: String): IO[NumberFormatException, Duration] =
       for {
-        decimal   <- Task(Integer.parseInt(input)).mapError{case nfe: NumberFormatException => nfe}
+        decimal   <- IO(Integer.parseInt(input)).refineToOrDie[NumberFormatException]
         duration  <- UIO(Duration(decimal, java.util.concurrent.TimeUnit.SECONDS))
       } yield duration
 
@@ -146,7 +148,10 @@ object Cat extends App {
     * Implement a function to read a file on the blocking thread pool, storing
     * the result into a string.
     */
-  def readFile(file: String): ZIO[Blocking, IOException, String] = ???
+  def readFile(file: String): ZIO[Blocking, IOException, String] =
+    blocking {
+      ZIO.effect(scala.io.Source.fromFile(new java.io.File(file)).mkString).refineToOrDie[IOException]
+    }
 
   /**
     * EXERCISE 9
@@ -155,7 +160,11 @@ object Cat extends App {
     * contents of the specified file to standard output.
     */
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
-    ???
+    (for {
+      filename  <- Task(args.head)
+      cat       <- readFile(filename)
+      _         <- putStrLn(cat)
+    } yield ()).fold(_ => 1, _ => 0)
 }
 
 object CatIncremental extends App {
@@ -170,12 +179,25 @@ object CatIncremental extends App {
     * the blocking thread pool.
     */
   final case class FileHandle private (private val is: InputStream) {
-    final def close: ZIO[Blocking, IOException, Unit] = ???
+    final def close: ZIO[Blocking, IOException, Unit] =
+      blocking {
+        ZIO.effect(is.close()).refineToOrDie[IOException]
+      }
 
-    final def read: ZIO[Blocking, IOException, Option[Chunk[Byte]]] = ???
+    final def read: ZIO[Blocking, IOException, Option[Chunk[Byte]]] =
+      blocking {
+        ZIO.effect{
+          val arr: Array[Byte] = Array.ofDim[Byte](1024)
+          val readResult = is.read(arr)
+          if (readResult == -1) None else Some(Chunk.fromArray(arr))
+        }.refineToOrDie[IOException]
+      }
   }
   object FileHandle {
-    final def open(file: String): ZIO[Blocking, IOException, FileHandle] = ???
+    final def open(file: String): ZIO[Blocking, IOException, FileHandle] =
+      blocking {
+        ZIO.effect(new FileHandle(new FileInputStream(file))).refineToOrDie[IOException]
+      }
   }
 
   /**
@@ -186,7 +208,23 @@ object CatIncremental extends App {
     * interruption.
     */
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
-    ???
+  (args match {
+    case Nil =>
+      putStrLn("Please enter a file name.")
+    case fileName :: _ =>
+      FileHandle.open(fileName).bracket(_.close.orDie){fh =>
+        lazy val printLoop: ZIO[Any with Blocking with zio.console.Console, IOException, Unit] =
+          fh.read.flatMap{
+            case Some(chunk: Chunk[Byte]) =>
+              putStrLn(new String(chunk.toArray, java.nio.charset.StandardCharsets.UTF_8)) *>
+              printLoop
+            case None =>
+              fh.close.orDie
+          }
+        printLoop
+      }
+  }).fold(_ => 1, _ => 0)
+
 }
 
 object ComputePi extends App {
