@@ -280,7 +280,12 @@ object Hangman extends App {
     * Implement an effect that gets a single, lower-case character from
     * the user.
     */
-  lazy val getChoice: ZIO[Console, IOException, Char] = ???
+  lazy val getChoice: ZIO[Console, IOException, Char] =
+    getStrLn.flatMap{
+      case str if str.length == 1 => UIO(str.charAt(0))
+      case _                      => putStrLn("Please enter a single character.") *>
+                                      getChoice
+    }
 
   /**
     * EXERCISE 14
@@ -288,14 +293,22 @@ object Hangman extends App {
     * Implement an effect that prompts the user for their name, and
     * returns it.
     */
-  lazy val getName: ZIO[Console, IOException, String] = ???
+  lazy val getName: ZIO[Console, IOException, String] =
+    for {
+      _     <- putStrLn("Please enter your name.")
+      name  <- getStrLn
+    } yield name
 
   /**
     * EXERCISE 15
     *
     * Implement an effect that chooses a random word from the dictionary.
     */
-  lazy val chooseWord: ZIO[Random, Nothing, String] = ???
+  lazy val chooseWord: ZIO[Random, Nothing, String] =
+    for {
+      randomNum   <- nextInt(Dictionary.Dictionary.size)
+      word        <- UIO(Dictionary.Dictionary(randomNum))
+    } yield word
 
   /**
     * EXERCISE 17
@@ -303,7 +316,33 @@ object Hangman extends App {
     * Implement the main game loop, which gets choices from the user until
     * the game is won or lost.
     */
-  def gameLoop(ref: Ref[State]): ZIO[Console, IOException, Unit] = ???
+  def gameLoop(ref: Ref[State]): ZIO[Console, IOException, Unit] =
+    for {
+      oldState  <- ref.get
+      _         <- renderState(oldState)
+      choice    <- getChoice
+      newState  <- ref.update(s => s.copy(guesses = s.guesses ++ Set(choice)))
+      newRef    <- Ref.make(newState)
+      result    <- UIO(guessResult(oldState, newState, choice))
+      _         <- result match {
+                      case GuessResult.Won =>
+                        renderState(newState) *>
+                          putStrLn("Congratulations, you won!")
+                      case GuessResult.Correct =>
+                        putStrLn("Correct guess!") *>
+                          gameLoop(newRef)
+                      case GuessResult.Incorrect =>
+                        putStrLn("Incorrect guess :(") *>
+                          gameLoop(newRef)
+                      case GuessResult.Unchanged =>
+                        putStrLn("You already tried that character.") *>
+                          gameLoop(newRef)
+                      case GuessResult.Lost =>
+                        renderState(newState) *>
+                          putStrLn("GAME OVER!") *>
+                          putStrLn(s"The word was ${oldState.word}")
+                    }
+    } yield ()
 
   def renderState(state: State): ZIO[Console, Nothing, Unit] = {
 
@@ -362,7 +401,14 @@ object Hangman extends App {
     * and the above helper functions.
     */
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
-    ???
+    (for {
+      _           <- putStrLn("Welcome to Hangman.")
+      name        <- getName
+      word        <- chooseWord
+      firstState  <- Ref.make(State(name, Set.empty, word))
+      _           <- gameLoop(firstState)
+    } yield ()).fold(_ => 1, _ => 0)
+
 }
 
 /**
