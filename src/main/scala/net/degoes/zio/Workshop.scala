@@ -14,6 +14,9 @@ object HelloWorld extends App {
     */
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
     putStrLn("Hello World!") *> ZIO.succeed(0)
+
+//  val runtime = new DefaultRuntime {}
+//  runtime.unsafeRun(putStrLn("Hello World"))
 }
 
 object ErrorConversion extends App {
@@ -230,6 +233,7 @@ object CatIncremental extends App {
 object ComputePi extends App {
   import zio.random._
   import zio.console._
+  import zio.duration._
 
   /**
     * Some state to keep track of all points inside a circle,
@@ -259,6 +263,27 @@ object ComputePi extends App {
   val randomPoint: ZIO[Random, Nothing, (Double, Double)] =
     nextDouble zip nextDouble
 
+  /*
+  A fiber Fiber[E, A]
+  can be thought of as a process that will run concurrently, not necessarily in parallel
+
+  independent, logical threads of execution
+
+  if you use 8 threads, then zio will allocate to all of them ie. 8 fibers in parallel
+
+  use .fork to not run on main fork
+
+  join will return result when fully evaluated
+  can do a poll to check if done
+
+  Fabio Cats Ref and Defer talk is very good
+
+  STM is preferred
+
+  DOn't use fiber, only for small pieces, use higher level constructs
+
+   */
+
   /**
     * EXERCISE 12
     *
@@ -266,7 +291,13 @@ object ComputePi extends App {
     * ongoing estimates continuously until the estimation is complete.
     */
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
-    ???
+    for {
+      // if interrupted before beginning, ensuring will not be executed (small race condition)
+      fiber <- ((ZIO.sleep(10.seconds) *> putStrLn("Goodbye!")) ensuring putStrLn("Exiting...")).fork
+      _     <- putStrLn("Hello!")
+      _     <- fiber.interrupt
+    } yield 0
+
 }
 
 object Hangman extends App {
